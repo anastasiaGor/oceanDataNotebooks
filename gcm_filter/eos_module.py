@@ -371,7 +371,7 @@ def specvol_second_derivatives(sal, ct) :
 
     v_ct_ct_part = a010 + xs*(a110 + xs*(a210 + xs*(a310 + a410*xs))) + ys*(2.0*(a020 + xs*(a120 + xs*(a220 + a320*xs))) + ys*(3.0*(a030 + xs*(a130 + a230*xs)) + ys*(4.0*(a040 + a140*xs) + 5.0*a050*ys)))
     v_ct_ct = 0.025*0.025*v_ct_ct_part
-    return v_sa_sa_part, v_sa_ct, v_ct_ct
+    return v_sa_sa, v_sa_ct, v_ct_ct
 
 def rho_second_derivatives(sal, ct) :
     v_sa,v_ct = specvol_first_derivatives(sal, ct)
