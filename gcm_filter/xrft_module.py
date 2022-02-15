@@ -15,8 +15,6 @@ from dask import delayed
 import scipy.signal as sps
 import scipy.linalg as spl
 
-from .detrend import detrend as _detrend
-
 
 __all__ = [
     "fft",
@@ -1019,12 +1017,16 @@ def isotropize(ps, fftdim, nfactor=4, truncate=False):
     """
 
     # compute radial wavenumber bins
-    k = ps[fftdim[1]]
-    l = ps[fftdim[0]]
+    Nx = len(ps['freq_x']); Ny = len(ps['freq_y'])
+    k = xr.DataArray(np.arange(-Nx//2+1,Nx//2+1), dims='freq_x', name='kx')
+    l = xr.DataArray(np.arange(-Ny//2+1,Ny//2+1), dims='freq_y', name='ky')
 
     N = [k.size, l.size]
     nbins = int(min(N) / nfactor)
-    freq_r = np.sqrt(k ** 2 + l ** 2).rename("freq_r")
+#     N_half = min(N)//2
+#     base_log=1.5
+#     bins = base_log**np.linspace(0.,np.log2(N_half)/np.log2(base_log),num=nbins)    
+    freq_r = xr.DataArray(np.sqrt(l**2 + k**2), dims=['freq_y','freq_x'], coords={'freq_x' : ps['freq_x'], 'freq_y' : ps['freq_y']}, name='freq_r')
     kr = _groupby_bins_agg(freq_r, freq_r, bins=nbins, func="mean")
 
     if truncate:
@@ -1042,15 +1044,15 @@ def isotropize(ps, fftdim, nfactor=4, truncate=False):
         warnings.warn(msg, FutureWarning)
 
     iso_ps = (
-        _groupby_bins_agg(ps, freq_r, bins=nbins, func="mean")
+        _groupby_bins_agg(ps, freq_r, bins=nbins, func="sum")
         .rename({"freq_r_bins": "freq_r"})
         .drop_vars("freq_r")
     )
     iso_ps.coords["freq_r"] = kr.data
     if truncate:
-        return (iso_ps * iso_ps.freq_r).dropna("freq_r")
+        return (iso_ps).dropna("freq_r")
     else:
-        return iso_ps * iso_ps.freq_r
+        return iso_ps
 
 
 def isotropic_powerspectrum(*args, **kwargs):  # pragma: no cover
@@ -1279,3 +1281,94 @@ def fit_loglog(x, y):
     y_fit = 2 ** (np.log2(x) * p[0] + p[1])
 
     return y_fit, p[0], p[1]
+
+def _detrend(da, dim, detrend_type="constant"):
+    """
+    Detrend a DataArray
+    Parameters
+    ----------
+    da : xarray.DataArray
+        The data to detrend
+    dim : str or list
+        Dimensions along which to apply detrend.
+        Can be either one dimension or a list with two dimensions.
+        Higher-dimensional detrending is not supported.
+        If dask data are passed, the data must be chunked along dim.
+    detrend_type : {'constant', 'linear'}
+        If ``constant``, a constant offset will be removed from each dim.
+        If ``linear``, a linear least-squares fit will be estimated and removed
+        from the data.
+    Returns
+    -------
+    da : xarray.DataArray
+        The detrended data.
+    Notes
+    -----
+    This function will act lazily in the presence of dask arrays on the
+    input.
+    """
+
+    if dim is None:
+        dim = list(da.dims)
+    else:
+        if isinstance(dim, str):
+            dim = [dim]
+
+    if detrend_type not in ["constant", "linear", None]:
+        raise NotImplementedError(
+            "%s is not a valid detrending option. Valid "
+            "options are: 'constant','linear', or None." % detrend_type
+        )
+
+    if detrend_type is None:
+        return da
+    elif detrend_type == "constant":
+        return da - da.mean(dim=dim)
+    elif detrend_type == "linear":
+        data = da.data
+        axis_num = [da.get_axis_num(d) for d in dim]
+        chunks = getattr(data, "chunks", None)
+        if chunks:
+            axis_chunks = [data.chunks[a] for a in axis_num]
+            if not all([len(ac) == 1 for ac in axis_chunks]):
+                raise ValueError("Contiguous chunks required for detrending.")
+        if len(dim) == 1:
+            dt = xr.apply_ufunc(
+                sps.detrend,
+                da,
+                axis_num[0],
+                output_dtypes=[da.dtype],
+                dask="parallelized",
+            )
+        elif len(dim) == 2:
+            dt = xr.apply_ufunc(
+                _detrend_2d_ufunc,
+                da,
+                input_core_dims=[dim],
+                output_core_dims=[dim],
+                output_dtypes=[da.dtype],
+                vectorize=True,
+                dask="parallelized",
+            )
+        else:  # pragma: no cover
+            raise NotImplementedError(
+                "Only 1D and 2D detrending are implemented so far."
+            )
+
+    return dt
+
+
+def _detrend_2d_ufunc(arr):
+    assert arr.ndim == 2
+    N = arr.shape
+
+    col0 = np.ones(N[0] * N[1])
+    col1 = np.repeat(np.arange(N[0]), N[1]) + 1
+    col2 = np.tile(np.arange(N[1]), N[0]) + 1
+    G = np.stack([col0, col1, col2]).transpose()
+
+    d_obs = np.reshape(arr, (N[0] * N[1], 1))
+    m_est = np.dot(np.dot(spl.inv(np.dot(G.T, G)), G.T), d_obs)
+    d_est = np.dot(G, m_est)
+    linear_fit = np.reshape(d_est, N)
+    return arr - linear_fit
