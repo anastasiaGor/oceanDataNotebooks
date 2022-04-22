@@ -1,4 +1,3 @@
-# Module containing some fragments from xrft https://xrft.readthedocs.io/en/latest/index.html 
 import warnings
 import operator
 import sys
@@ -15,7 +14,6 @@ from dask import delayed
 import scipy.signal as sps
 import scipy.linalg as spl
 
-
 __all__ = [
     "fft",
     "ifft",
@@ -30,6 +28,7 @@ __all__ = [
     "isotropic_powerspectrum",
     "isotropic_crossspectrum",
     "fit_loglog",
+    "detrend",
 ]
 
 
@@ -165,7 +164,7 @@ def _ifreq(N, delta_x, real, shift):
     if real is None:
         fftfreq = [np.fft.fftfreq] * len(N)
     else:
-        irfftfreq = lambda Nx, dx: np.fft.fftfreq(
+        def irfftfreq(Nx, dx): return np.fft.fftfreq(
             2 * (Nx - 1), dx
         )  # Not in standard numpy !
         fftfreq = [np.fft.fftfreq] * (len(N) - 1)
@@ -187,8 +186,10 @@ def _new_dims_and_coords(da, dim, wavenm, prefix):
 
     for d in dim:
         k = wavenm[d]
-        new_name = prefix + d if d[: len(prefix)] != prefix else d[len(prefix) :]
-        new_dim = xr.DataArray(k, dims=new_name, coords={new_name: k}, name=new_name)
+        new_name = prefix + \
+            d if d[: len(prefix)] != prefix else d[len(prefix):]
+        new_dim = xr.DataArray(k, dims=new_name, coords={
+                               new_name: k}, name=new_name)
         new_dim.attrs.update({"spacing": k[1] - k[0]})
         new_coords[new_name] = new_dim
         swap_dims[d] = new_name
@@ -206,7 +207,8 @@ def _diff_coord(coord):
 
         ref_units = "seconds since 1800-01-01 00:00:00"
         decoded_time = cftime.date2num(coord, ref_units, calendar)
-        coord = xr.DataArray(decoded_time, dims=coord.dims, coords=coord.coords)
+        coord = xr.DataArray(
+            decoded_time, dims=coord.dims, coords=coord.coords)
         return np.diff(coord)
     elif pd.api.types.is_datetime64_dtype(v0):
         return np.diff(coord).astype("timedelta64[s]").astype("f8")
@@ -333,7 +335,7 @@ def fft(
     """
 
     if not true_phase and not true_amplitude:
-        msg = "Flags true_phase and true_amplitude will be set to True in future versions of xrft.dft to preserve the theoretical phasing and amplitude of Fourier Transform. Consider using xrft.fft to ensure future compatibility with numpy.fft like behavior and to deactivate this warning."
+        msg = "Flags true_phase and true_amplitude will be set to True in future versions of xrft.fft to preserve the theoretical phasing and amplitude of Fourier Transform. Consider using xrft.fft to ensure future compatibility with numpy.fft like behavior and to deactivate this warning."
         warnings.warn(msg, FutureWarning)
 
     if dim is None:
@@ -344,7 +346,7 @@ def fft(
 
     if "real" in kwargs:
         real_dim = kwargs.get("real")
-        msg = "`real` flag will be deprecated in future version of xrft.dft and replaced by `real_dim` flag."
+        msg = "`real` flag will be deprecated in future version of xrft.fft and replaced by `real_dim` flag."
         warnings.warn(msg, FutureWarning)
 
     if real_dim is not None:
@@ -441,7 +443,8 @@ def fft(
 
     newcoords, swap_dims = _new_dims_and_coords(da, dim, k, prefix)
     daft = xr.DataArray(
-        f, dims=da.dims, coords=dict([c for c in da.coords.items() if c[0] not in dim])
+        f, dims=da.dims, coords=dict(
+            [c for c in da.coords.items() if c[0] not in dim])
     )
     daft = daft.swap_dims(swap_dims).assign_coords(newcoords)
     daft = daft.drop([d for d in dim if d in daft.coords])
@@ -527,7 +530,7 @@ def ifft(
     """
 
     if not true_phase and not true_amplitude:
-        msg = "Flags true_phase and true_amplitude will be set to True in future versions of xrft.idft to preserve the theoretical phasing and amplitude of Inverse Fourier Transform. Consider using xrft.ifft to ensure future compatibility with numpy.ifft like behavior and to deactivate this warning."
+        msg = "Flags true_phase and true_amplitude will be set to True in future versions of xrft.ifft to preserve the theoretical phasing and amplitude of Inverse Fourier Transform. Consider using xrft.ifft to ensure future compatibility with numpy.ifft like behavior and to deactivate this warning."
         warnings.warn(msg, FutureWarning)
 
     if dim is None:
@@ -538,7 +541,7 @@ def ifft(
 
     if "real" in kwargs:
         real_dim = kwargs.get("real")
-        msg = "`real` flag will be deprecated in future version of xrft.idft and replaced by `real_dim` flag."
+        msg = "`real` flag will be deprecated in future version of xrft.ifft and replaced by `real_dim` flag."
         warnings.warn(msg, FutureWarning)
     if real_dim is not None:
         if real_dim not in daft.dims:
@@ -551,7 +554,7 @@ def ifft(
             ]  # real dim has to be moved or added at the end !
     if lag is None:
         lag = [daft[d].attrs.get("direct_lag", 0.0) for d in dim]
-        msg = "Default idft's behaviour (lag=None) changed! Default value of lag was zero (centered output coordinates) and is now set to transformed coordinate's attribute: 'direct_lag'."
+        msg = "Default ifft's behaviour (lag=None) changed! Default value of lag was zero (centered output coordinates) and is now set to transformed coordinate's attribute: 'direct_lag'."
         warnings.warn(msg, FutureWarning)
     else:
         if isinstance(lag, float) or isinstance(lag, int):
@@ -559,7 +562,7 @@ def ifft(
         if len(dim) != len(lag):
             raise ValueError("dim and lag must have the same length.")
         if not true_phase:
-            msg = "Setting lag with true_phase=False does not guarantee accurate idft."
+            msg = "Setting lag with true_phase=False does not guarantee accurate ifft."
             warnings.warn(msg, Warning)
         lag = [
             daft[d].attrs.get("direct_lag") if l is None else l
@@ -660,7 +663,8 @@ def ifft(
             da = da.assign_coords({tfd: da[tfd] + l})
 
     if true_amplitude:
-        da = da / np.prod([float(da[up_dim].spacing) for up_dim in swap_dims.values()])
+        da = da / np.prod([float(da[up_dim].spacing)
+                           for up_dim in swap_dims.values()])
 
     return da.transpose(
         *[swap_dims.get(d, d) for d in rawdims]
@@ -697,7 +701,7 @@ def power_spectrum(
         If scaling = 'density', correct for the energy (integral) of the spectrum. This ensures, for example, that the power spectral density integrates to the square of the RMS of the signal (ie that Parseval's theorem is satisfied). Note that in most cases, Parseval's theorem will only be approximately satisfied with this correction as it assumes that the signal being windowed is independent of the window. The correction becomes more accurate as the width of the window gets large in comparison with any noticeable period in the signal.
         If False, the spectrum gives a representation of the power in the windowed signal.
         Note that when True, Parseval's theorem may only be approximately satisfied.
-    kwargs : dict : see xrft.dft for argument list
+    kwargs : dict : see xrft.fft for argument list
     """
 
     if "density" in kwargs:
@@ -726,7 +730,7 @@ def power_spectrum(
     ps = np.abs(daft) ** 2
 
     if real_dim is not None:
-        real = [d for d in updated_dims if real_dim == d[-len(real_dim) :]][
+        real = [d for d in updated_dims if real_dim == d[-len(real_dim):]][
             0
         ]  # find transformed real dimension
         f = np.full(ps.sizes[real], 2.0)
@@ -743,7 +747,8 @@ def power_spectrum(
                     "window_correction can only be applied when windowing is turned on."
                 )
             else:
-                windows, _ = _apply_window(da, dim, window_type=kwargs.get("window"))
+                windows, _ = _apply_window(
+                    da, dim, window_type=kwargs.get("window"))
                 ps = ps / (windows ** 2).mean()
         fs = np.prod([float(ps[d].spacing) for d in updated_dims])
         ps *= fs
@@ -754,7 +759,8 @@ def power_spectrum(
                     "window_correction can only be applied when windowing is turned on."
                 )
             else:
-                windows, _ = _apply_window(da, dim, window_type=kwargs.get("window"))
+                windows, _ = _apply_window(
+                    da, dim, window_type=kwargs.get("window"))
                 ps = ps / windows.mean() ** 2
         fs = np.prod([float(ps[d].spacing) for d in updated_dims])
         ps *= fs ** 2
@@ -804,12 +810,12 @@ def cross_spectrum(
         If scaling = 'density', correct for the energy (integral) of the spectrum. This ensures, for example, that the power spectral density integrates to the square of the RMS of the signal (ie that Parseval's theorem is satisfied). Note that in most cases, Parseval's theorem will only be approximately satisfied with this correction as it assumes that the signal being windowed is independent of the window. The correction becomes more accurate as the width of the window gets large in comparison with any noticeable period in the signal.
         If False, the spectrum gives a representation of the power in the windowed signal.
         Note that when True, Parseval's theorem may only be approximately satisfied.
-    kwargs : dict : see xrft.dft for argument list
+    kwargs : dict : see xrft.fft for argument list
     """
 
     if not true_phase:
         msg = (
-            "true_phase flag will be set to True in future version of xrft.dft possibly impacting cross_spectrum output. "
+            "true_phase flag will be set to True in future version of xrft.fft possibly impacting cross_spectrum output. "
             + "Set explicitely true_phase = False in cross_spectrum arguments list to ensure future compatibility "
             + "with numpy-like behavior where the coordinates are disregarded."
         )
@@ -833,8 +839,10 @@ def cross_spectrum(
 
     kwargs.update({"true_amplitude": True})
 
-    daft1 = fft(da1, dim=dim, real_dim=real_dim, true_phase=true_phase, **kwargs)
-    daft2 = fft(da2, dim=dim, real_dim=real_dim, true_phase=true_phase, **kwargs)
+    daft1 = fft(da1, dim=dim, real_dim=real_dim,
+                true_phase=true_phase, **kwargs)
+    daft2 = fft(da2, dim=dim, real_dim=real_dim,
+                true_phase=true_phase, **kwargs)
 
     if daft1.dims != daft2.dims:
         raise ValueError("The two datasets have different dimensions")
@@ -845,7 +853,7 @@ def cross_spectrum(
     cs = daft1 * np.conj(daft2)
 
     if real_dim is not None:
-        real = [d for d in updated_dims if real_dim == d[-len(real_dim) :]][
+        real = [d for d in updated_dims if real_dim == d[-len(real_dim):]][
             0
         ]  # find transformed real dimension
         f = np.full(cs.sizes[real], 2.0)
@@ -862,7 +870,8 @@ def cross_spectrum(
                     "window_correction can only be applied when windowing is turned on."
                 )
             else:
-                windows, _ = _apply_window(da1, dim, window_type=kwargs.get("window"))
+                windows, _ = _apply_window(
+                    da1, dim, window_type=kwargs.get("window"))
                 cs = cs / (windows ** 2).mean()
         fs = np.prod([float(cs[d].spacing) for d in updated_dims])
         cs *= fs
@@ -873,7 +882,8 @@ def cross_spectrum(
                     "window_correction can only be applied when windowing is turned on."
                 )
             else:
-                windows, _ = _apply_window(da1, dim, window_type=kwargs.get("window"))
+                windows, _ = _apply_window(
+                    da1, dim, window_type=kwargs.get("window"))
                 cs = cs / windows.mean() ** 2
         fs = np.prod([float(cs[d].spacing) for d in updated_dims])
         cs *= fs ** 2
@@ -901,11 +911,11 @@ def cross_phase(da1, da2, dim=None, true_phase=False, **kwargs):
         The data to be transformed
     da2 : `xarray.DataArray`
         The data to be transformed
-    kwargs : dict : see xrft.dft for argument list
+    kwargs : dict : see xrft.fft for argument list
     """
     if not true_phase:
         msg = (
-            "true_phase flag will be set to True in future version of xrft.dft possibly impacting cross_phase output. "
+            "true_phase flag will be set to True in future version of xrft.fft possibly impacting cross_phase output. "
             + "Set explicitely true_phase = False in cross_spectrum arguments list to ensure future compatibility "
             + "with numpy-like behavior where the coordinates are disregarded."
         )
@@ -992,7 +1002,7 @@ def _groupby_bins_agg(
     return result
 
 
-def isotropize(ps, fftdim, nfactor=4, truncate=False):
+def isotropize(ps, fftdim, nfactor=4, truncate=False, complx=False):
     """
     Isotropize a 2D power spectrum or cross spectrum
     by taking an azimuthal average.
@@ -1014,19 +1024,25 @@ def isotropize(ps, fftdim, nfactor=4, truncate=False):
     truncate : bool, optional
         If True, the spectrum will be truncated for wavenumbers larger than
         the Nyquist wavenumber.
+    complx : bool, optional
+        If True, isotropize allows for complex numbers.
     """
 
     # compute radial wavenumber bins
-    Nx = len(ps['freq_x']); Ny = len(ps['freq_y'])
-    k = xr.DataArray(np.arange(-Nx//2+1,Nx//2+1), dims='freq_x', name='kx')
-    l = xr.DataArray(np.arange(-Ny//2+1,Ny//2+1), dims='freq_y', name='ky')
+    Nx = len(ps[fftdim[1]])
+    Ny = len(ps[fftdim[0]])
+    k = ps[fftdim[1]]*Nx
+    l = ps[fftdim[0]]*Ny
+    print(k)
+    print(l)
 
     N = [k.size, l.size]
     nbins = int(min(N) / nfactor)
-#     N_half = min(N)//2
-#     base_log=1.5
-#     bins = base_log**np.linspace(0.,np.log2(N_half)/np.log2(base_log),num=nbins)    
-    freq_r = xr.DataArray(np.sqrt(l**2 + k**2), dims=['freq_y','freq_x'], coords={'freq_x' : ps['freq_x'], 'freq_y' : ps['freq_y']}, name='freq_r')
+    freq_r = np.sqrt(k ** 2 + l ** 2).rename("freq_r")
+    #freq_r = xr.DataArray(np.sqrt(l**2 + k**2), dims=['freq_y', 'freq_x'],
+    #                      coords={'freq_x': k.values,
+    #                              'freq_y': l.values},
+    #                      name='freq_r')
     kr = _groupby_bins_agg(freq_r, freq_r, bins=nbins, func="mean")
 
     if truncate:
@@ -1043,14 +1059,23 @@ def isotropize(ps, fftdim, nfactor=4, truncate=False):
         )
         warnings.warn(msg, FutureWarning)
 
-    iso_ps = (
-        _groupby_bins_agg(ps, freq_r, bins=nbins, func="sum")
-        .rename({"freq_r_bins": "freq_r"})
-        .drop_vars("freq_r")
-    )
+    if complx:
+        iso_ps = (
+            _groupby_bins_agg(ps, freq_r, bins=nbins,
+                              func="mean", dtype=np.complex128)
+            .rename({"freq_r_bins": "freq_r"})
+            .drop_vars("freq_r")
+        )
+    else:
+        iso_ps = (
+            _groupby_bins_agg(ps, freq_r, bins=nbins, func="mean")
+            .rename({"freq_r_bins": "freq_r"})
+            .drop_vars("freq_r")
+        )
     iso_ps.coords["freq_r"] = kr.data
     if truncate:
-        return (iso_ps).dropna("freq_r")
+        #return (iso_ps).dropna("freq_r", how="any")
+        return iso_ps.where(np.isfinite(iso_ps.freq_r), drop=True)
     else:
         return iso_ps
 
@@ -1253,7 +1278,7 @@ def isotropic_cross_spectrum(
 
     fftdim = ["freq_" + d for d in dim]
 
-    return isotropize(cs, fftdim, nfactor=nfactor, truncate=truncate)
+    return isotropize(cs, fftdim, nfactor=nfactor, truncate=truncate, complx=True)
 
 
 def fit_loglog(x, y):
@@ -1285,6 +1310,7 @@ def fit_loglog(x, y):
 def _detrend(da, dim, detrend_type="constant"):
     """
     Detrend a DataArray
+
     Parameters
     ----------
     da : xarray.DataArray
@@ -1298,10 +1324,12 @@ def _detrend(da, dim, detrend_type="constant"):
         If ``constant``, a constant offset will be removed from each dim.
         If ``linear``, a linear least-squares fit will be estimated and removed
         from the data.
+
     Returns
     -------
     da : xarray.DataArray
         The detrended data.
+
     Notes
     -----
     This function will act lazily in the presence of dask arrays on the
