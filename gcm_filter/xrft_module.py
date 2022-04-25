@@ -1029,20 +1029,12 @@ def isotropize(ps, fftdim, nfactor=4, truncate=False, complx=False):
     """
 
     # compute radial wavenumber bins
-    Nx = len(ps[fftdim[1]])
-    Ny = len(ps[fftdim[0]])
-    k = ps[fftdim[1]]*Nx
-    l = ps[fftdim[0]]*Ny
-    print(k)
-    print(l)
+    k = ps[fftdim[1]]
+    l = ps[fftdim[0]]
 
     N = [k.size, l.size]
     nbins = int(min(N) / nfactor)
     freq_r = np.sqrt(k ** 2 + l ** 2).rename("freq_r")
-    #freq_r = xr.DataArray(np.sqrt(l**2 + k**2), dims=['freq_y', 'freq_x'],
-    #                      coords={'freq_x': k.values,
-    #                              'freq_y': l.values},
-    #                      name='freq_r')
     kr = _groupby_bins_agg(freq_r, freq_r, bins=nbins, func="mean")
 
     if truncate:
@@ -1075,9 +1067,9 @@ def isotropize(ps, fftdim, nfactor=4, truncate=False, complx=False):
     iso_ps.coords["freq_r"] = kr.data
     if truncate:
         #return (iso_ps).dropna("freq_r", how="any")
-        return iso_ps.where(np.isfinite(iso_ps.freq_r), drop=True)
+        return (iso_ps * iso_ps.coords["freq_r"]).where(np.isfinite(iso_ps.freq_r), drop=True)
     else:
-        return iso_ps
+        return iso_ps * iso_ps.coords["freq_r"]
 
 
 def isotropic_powerspectrum(*args, **kwargs):  # pragma: no cover
