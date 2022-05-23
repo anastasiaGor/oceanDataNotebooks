@@ -1,4 +1,18 @@
+# IPython
+profile_default/
+ipython_config.py
+.ipynb_checkpoint/
+**/.ipynb_checkpoint/
+*checkpoint.ipynb
 
+*.png
+*.pdf
+*.aux
+*.log
+*.out
+*.dat
+
+dask-worker-space/*
 *.lock
 *.dirlock
 *.pyc
